@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: ingestion-worker
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: rag-worker-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      # This allows multiple threads in this single worker to consume from different partitions
+      concurrency: 3 
+
+server:
+  port: 8080
