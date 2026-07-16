@@ -1,47 +1,64 @@
 package com.rag.ingestion.service;
 
+import com.rag.ingestion.factory.DocumentParserFactory;
+import com.rag.ingestion.parser.DocumentParser;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
+
+import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.*;
 
 @Service
 public class DocumentProcessor {
 
-    // 1. Thread Pool: Bounded to prevent OutOfMemory errors on massive documents
-    private final ExecutorService executorService = Executors.newFixedThreadPool(10);
-    
-    // 2. Safe State Tracking: Thread-safe map to track progress per tenant
-    private final ConcurrentHashMap<String, Integer> ingestionState = new ConcurrentHashMap<>();
-    
-    private final RestTemplate restTemplate = new RestTemplate(); // To call Python API
+    private final DocumentParserFactory parserFactory;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
 
-    public void processDocumentChunks(String tenantId, List<String> textChunks) {
-        // Initialize state
-        ingestionState.put(tenantId, 0);
-
-        // 3. CompletableFuture: Parallelize calls to the Python API
-        List<CompletableFuture<Void>> futures = textChunks.stream()
-            .map(chunk -> CompletableFuture.runAsync(() -> {
-                
-                // Call Python FastAPI to get embeddings
-                callPythonGatewayForEmbedding(tenantId, chunk);
-                
-                // Safely update state across multiple threads
-                ingestionState.computeIfPresent(tenantId, (key, val) -> val + 1);
-                
-            }, executorService))
-            .toList();
-
-        // Wait for all parallel chunks to finish
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        
-        System.out.println("Finished processing " + ingestionState.get(tenantId) + " chunks for tenant: " + tenantId);
+    public DocumentProcessor(DocumentParserFactory parserFactory, KafkaTemplate<String, String> kafkaTemplate) {
+        this.parserFactory = parserFactory;
+        this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = new ObjectMapper();
     }
 
-    private void callPythonGatewayForEmbedding(String tenantId, String chunk) {
-        // Here you will make an HTTP POST request to http://localhost:8000/api/v1/embed
-        // and push the resulting vector + metadata to your Vector DB.
-        System.out.println("Thread " + Thread.currentThread().getName() + " embedding chunk.");
+    public void processIncomingFile(String tenantId, byte[] rawFile, String contentType) {
+        try {
+            System.out.println("📄 [PROCESSOR] Received file for tenant: " + tenantId + " | Type: " + contentType);
+            
+            DocumentParser parser = parserFactory.getParser(contentType);
+            String fullText = parser.extractText(rawFile);
+            System.out.println("✅ Successfully extracted text for tenant: " + tenantId);
+            
+            List<String> textChunks = Arrays.asList(fullText.split("\\n\\n"));
+            
+            publishChunksToKafka(tenantId, textChunks);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse document: " + e.getMessage(), e);
+        }
+    }
+
+    @CircuitBreaker(name = "kafkaPublishCall", fallbackMethod = "fallbackPublish")
+    public void publishChunksToKafka(String tenantId, List<String> textChunks) throws Exception {
+        System.out.println("🚀 [PROCESSOR] Publishing " + textChunks.size() + " chunks to worker queue...");
+        
+        for (int i = 0; i < textChunks.size(); i++) {
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("tenant_id", tenantId);
+            payload.put("text_payload", textChunks.get(i));
+            payload.put("chunk_index", i);
+            payload.put("total_chunks", textChunks.size());
+
+            kafkaTemplate.send("rag-document-chunks", tenantId, payload.toString());
+        }
+        System.out.println("✅ All chunks dispatched! Handing off to AI Embedding Workers.");
+    }
+
+    public void fallbackPublish(String tenantId, List<String> textChunks, Exception ex) {
+        System.err.println("🛑 [CIRCUIT BREAKER] Kafka is unreachable. Routing to DLQ...");
+        throw new RuntimeException("Kafka Publish Failed", ex);
     }
 }

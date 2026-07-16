@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: polyglot-rag
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: engine-config
+  namespace: polyglot-rag
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+  REDIS_HOST: "redis-service"
+  QDRANT_HOST: "qdrant-service"
+  POSTGRES_URL: "jdbc:postgresql://postgres-service:5432/ragstream_metadata"
