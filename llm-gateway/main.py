@@ -17,9 +17,11 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
 api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
-    raise ValueError("GEMINI_API_KEY environment variable is missing!")
+    raise ValueError("GEMINI_API_KEY environment variable is missing! Add it to the .env file or export it in your shell.")
 
 gemini_client = genai.Client(api_key=api_key)
 

@@ -17,8 +17,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class DocumentIngestionWorker {
@@ -28,8 +30,9 @@ public class DocumentIngestionWorker {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final EmbeddingModel embeddingModel = new AllMiniLmL6V2EmbeddingModel();
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
-    
     private final SimpMessagingTemplate messagingTemplate;
+
+    private final ConcurrentHashMap<String, AtomicInteger> chunksProcessedTracker = new ConcurrentHashMap<>();
 
     public DocumentIngestionWorker(SimpMessagingTemplate messagingTemplate) {
         this.messagingTemplate = messagingTemplate;
@@ -42,20 +45,28 @@ public class DocumentIngestionWorker {
                 JsonNode event = objectMapper.readTree(messagePayload);
                 String tenantId = event.get("tenant_id").asText();
                 String textPayload = event.get("text_payload").asText();
-                int chunkIndex = event.get("chunk_index").asInt();
-                int totalChunks = event.get("total_chunks").asInt(); 
+                int totalChunks = event.get("total_chunks").asInt();
 
                 Embedding vector = embeddingModel.embed(textPayload).content();
 
                 upsertToQdrant(tenantId, textPayload, vector.vectorAsList());
-               
-                double progress = ((double) (chunkIndex + 1) / totalChunks) * 100;
+                
+                chunksProcessedTracker.putIfAbsent(tenantId, new AtomicInteger(0));
+                
+                int currentFinishedCount = chunksProcessedTracker.get(tenantId).incrementAndGet();
+                
+                double progress = ((double) currentFinishedCount / totalChunks) * 100;
                 String wsPayload = String.format("{\"tenant\":\"%s\", \"progress\":%.0f}", tenantId, progress);
                 
                 messagingTemplate.convertAndSend("/topic/progress/" + tenantId, wsPayload);
                 
                 log.info("✅ SUCCESS: Indexed chunk {}/{} ({}%) for tenant [{}]", 
-                         (chunkIndex + 1), totalChunks, (int)progress, tenantId);
+                         currentFinishedCount, totalChunks, (int)progress, tenantId);
+
+                if (currentFinishedCount >= totalChunks) {
+                    chunksProcessedTracker.remove(tenantId);
+                    log.info("🎉 Tenant [{}] ingestion fully complete. State cleared from memory.", tenantId);
+                }
 
             } catch (Exception e) {
                 log.error("❌ Failed to process Kafka chunk: {}", e.getMessage());
