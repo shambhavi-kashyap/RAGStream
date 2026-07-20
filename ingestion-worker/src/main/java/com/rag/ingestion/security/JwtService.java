@@ -13,7 +13,7 @@ import java.util.function.Function;
 @Service
 public class JwtService {
 
-    private static final String SECRET_KEY = "YourSuperSecretEnterpriseRagStreamKeyThatIsAtLeast256BitsLong!";
+    private static final String SECRET_KEY = System.getenv("JWT_SECRET");
     private static final long EXPIRATION_TIME = 86400000; 
     
     public String generateToken(com.rag.ingestion.domain.User user) {

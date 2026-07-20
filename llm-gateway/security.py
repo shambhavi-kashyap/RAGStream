@@ -1,8 +1,9 @@
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
+import os
 
-SECRET_KEY = "YourSuperSecretEnterpriseRagStreamKeyThatIsAtLeast256BitsLong!"
+SECRET_KEY = os.getenv("JWT_SECRET")
 ALGORITHMS = ["HS256", "HS384", "HS512"]
 
 security_scheme = HTTPBearer()

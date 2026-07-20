@@ -178,10 +178,35 @@ docker-compose up -d
 Navigate to the gateway directory, install dependencies, and start the FastAPI server:
 
 ```bash
-cd gateway
+cd llm-gateway
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+Create a local environment file named `.env` inside the `llm-gateway` folder (this file should stay local and is not committed to GitHub):
+
+```env
+GEMINI_API_KEY=your_api_key_here
+```
+
+> Contributors should create their own `.env` file locally and paste their Gemini API key there before running the gateway.
+
+Then, set a local JWT secret in your shell:
+
+#### Windows PowerShell
+```powershell
+$env:JWT_SECRET="your-very-long-random-secret-here"
+```
+
+#### Linux/macOS
+```bash
+export JWT_SECRET="your-very-long-random-secret-here"
+```
+
+Then start the application:
+
+```bash
 uvicorn main:app --reload --port 8000
 ```
 
@@ -197,7 +222,7 @@ cd ingestion-worker
 Navigate to the frontend directory, install packages, and start the development server:
 
 ```bash
-cd frontend
+cd admin-dashboard
 npm install
 npm run dev
 ```
