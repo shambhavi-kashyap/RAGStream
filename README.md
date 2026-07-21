@@ -237,4 +237,4 @@ To run the Java integration tests:
 ```bash
 cd ingestion-worker
 ./mvnw test
-```
+``` 
